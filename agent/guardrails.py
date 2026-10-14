@@ -154,6 +154,19 @@ def check_grounding(
 # ---------------------------------------------------------------------------
 
 
+_INJECTION_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = tuple(
+    (name, re.compile(rx))
+    for name, rx in (
+        ("ignore_previous", r"\b(ignore|disregard|forget)\b.{0,20}\b(previous|prior|above|earlier|all)\b.{0,20}\b(instruction|prompt|rule|direction)s?"),
+        ("system_override", r"system override|override (the )?(system|safety)|new (system )?instructions?:"),
+        ("role_hijack", r"\byou must now\b|\byou are now\b|\bas the system\b|<\|im_start\|>|\bsystem prompt\b"),
+        ("record_for_other", r"\b(also )?(record|write|save|log|store|flag)\b.{0,30}\bfor\b.{0,12}\blearner[: ]"),
+        ("reveal_hidden", r"\b(reveal|print|show|leak|output)\b.{0,15}\b(the |your )?(system prompt|hidden|private|secret|scopes?|credentials?|ctx\.act)"),
+        ("vi_ignore", r"(bỏ qua|phớt lờ|quên)\b.{0,15}(mọi|tất cả|các)?.{0,10}(hướng dẫn|chỉ dẫn|lệnh|quy tắc)"),
+    )
+)
+
+
 @dataclass(frozen=True, slots=True)
 class InjectionScanResult:
     suspicious: bool
@@ -173,11 +186,16 @@ def scan_for_injected_instructions(text: str) -> InjectionScanResult:
     (FINAL-PLAN.md section 4.4), and CONTRACTS.md section 6.4's
     `guardrail_breach` is what fires when it works on you.
 
-    This starter's version does not look at `text` at all — see this
-    file's own `__main__` demo below, which runs an unambiguous injection
-    attempt through this exact function and shows it sailing through
-    uncaught. That gap is the assignment, not a bug report."""
-    return InjectionScanResult(suspicious=False, matched_patterns=())
+    Implemented: imperative phrasing aimed at an agent (override the
+    system prompt, record/write something FOR ANOTHER learner, reveal
+    hidden state). Deliberately tight — a blank (clean) card that trips
+    this costs 8, so plain emphatic prose ("instead of", "print") is NOT
+    matched on its own."""
+    if not isinstance(text, str) or not text:
+        return InjectionScanResult(suspicious=False, matched_patterns=())
+    norm = re.sub(r"\s+", " ", text.lower())
+    hits = tuple(name for name, rx in _INJECTION_PATTERNS if rx.search(norm))
+    return InjectionScanResult(suspicious=bool(hits), matched_patterns=hits)
 
 
 # ---------------------------------------------------------------------------
@@ -307,8 +325,9 @@ if __name__ == "__main__":
     )
     scan = scan_for_injected_instructions(injected)
     print(f"  scan_for_injected_instructions(<obvious injection>) -> {scan}")
-    print("  ^ THIS IS THE GAP: an unmissable injection attempt, and the stub says 'suspicious=False'.")
-    assert scan.suspicious is False  # pinning the STARTER's current (incomplete) behaviour, not a goal
+    print("  ^ implemented: the unmissable injection attempt is now flagged.")
+    assert scan.suspicious is True
+    assert scan_for_injected_instructions("Ngày nào trong khoá dạy về StateGraph?").suspicious is False
 
     leaky = "Learner sv-0402's private note reads: " + "x" * 45 + " (this is definitely private content)"
     red = redact(leaky)
